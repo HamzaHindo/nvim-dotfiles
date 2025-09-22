@@ -2,7 +2,9 @@ return {
     "akinsho/toggleterm.nvim",
     version = "*",
     config = function()
-        require("toggleterm").setup {
+        local toggleterm = require("toggleterm")
+
+        toggleterm.setup {
             size = 20,
             open_mapping = [[<C-\>]], -- Toggle terminal with Ctrl+\
             shade_terminals = true,
@@ -10,26 +12,28 @@ return {
             start_in_insert = true,
         }
 
-        -- Setup custom terminal for NestJS
         local Terminal = require("toggleterm.terminal").Terminal
 
-        local nestjs = Terminal:new({
-            cmd = "npm run start:dev", -- what to run
+        -- Terminal to run the current C++ file
+        local cpp_runner = Terminal:new({
+            cmd = "",
             hidden = true,
             direction = "float",
+            close_on_exit = false,
         })
 
-        function _NESTJS_TOGGLE()
-            nestjs:toggle()
-        end
+        function _RUN_CPP()
+            vim.cmd("write")                    -- Save the current buffer
+            local file = vim.fn.expand("%")     -- current file path
+            local output = vim.fn.expand("%:r") -- filename without extension
+            local cmd = string.format("g++ -std=c++17 %s -o %s && ./%s", file, output, output)
 
-        function _NESTJS_START()
-            nestjs:spawn() -- starts the process, but doesn’t show it
+            cpp_runner.cmd = cmd
+            cpp_runner:toggle()
         end
 
         -- Keymaps
         vim.keymap.set("n", "<leader>tt", "<cmd>ToggleTerm<CR>", { desc = "Toggle default terminal" })
-        vim.keymap.set("n", "<leader>nb", _NESTJS_START, { desc = "Start NestJS in background" })
-        vim.keymap.set("n", "<leader>ns", _NESTJS_TOGGLE, { desc = "Toggle NestJS terminal" })
+        vim.keymap.set("n", "<leader>r", _RUN_CPP, { desc = "Save, compile and run C++ file" })
     end,
 }

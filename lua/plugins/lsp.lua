@@ -1,4 +1,3 @@
--- return {}
 return {
     'neovim/nvim-lspconfig',
     dependencies = {
@@ -21,9 +20,12 @@ return {
             "typescript",
             "ts",
             "js",
-            "javascript"
+            "javascript",
+            "cpp",
+            "c",
         }
-        -- Create a keymap for vim.lsp.buf.implementation
+
+        -- Autoformat on save for specific filetypes
         vim.api.nvim_create_autocmd('LspAttach', {
             callback = function(args)
                 local client = vim.lsp.get_client_by_id(args.data.client_id)
@@ -43,7 +45,7 @@ return {
             end
         })
 
-        -- Add borders to floating windows
+        -- Borders for floating windows
         vim.lsp.handlers['textDocument/hover'] = vim.lsp.with(
             vim.lsp.handlers.hover,
             { border = 'rounded' }
@@ -53,7 +55,7 @@ return {
             { border = 'rounded' }
         )
 
-        -- Configure error/warnings interface
+        -- Diagnostics configuration
         vim.diagnostic.config({
             virtual_text = true,
             severity_sort = true,
@@ -73,33 +75,33 @@ return {
             },
         })
 
-        local lspconfig_defaults = require('lspconfig').util.default_config
-        lspconfig_defaults.capabilities = vim.tbl_deep_extend(
+        -- Setup capabilities for nvim-cmp
+        local capabilities = vim.tbl_deep_extend(
             'force',
-            lspconfig_defaults.capabilities,
+            vim.lsp.protocol.make_client_capabilities(),
             require('cmp_nvim_lsp').default_capabilities()
         )
 
-        -- This is where you enable features that only work
-        -- if there is a language server active in the file
+        -- Keymaps on LSP attach
         vim.api.nvim_create_autocmd('LspAttach', {
             callback = function(event)
                 local opts = { buffer = event.buf }
 
-                vim.keymap.set('n', 'K', '<cmd>lua vim.lsp.buf.hover()<cr>', opts)
-                vim.keymap.set('n', 'gd', '<cmd>lua vim.lsp.buf.definition()<cr>', opts)
-                vim.keymap.set('n', 'gD', '<cmd>lua vim.lsp.buf.declaration()<cr>', opts)
-                vim.keymap.set('n', 'gi', '<cmd>lua vim.lsp.buf.implementation()<cr>', opts)
-                vim.keymap.set('n', 'go', '<cmd>lua vim.lsp.buf.type_definition()<cr>', opts)
-                vim.keymap.set('n', 'gr', '<cmd>lua vim.lsp.buf.references()<cr>', opts)
-                vim.keymap.set('n', 'gs', '<cmd>lua vim.lsp.buf.signature_help()<cr>', opts)
-                vim.keymap.set('n', 'gl', '<cmd>lua vim.diagnostic.open_float()<cr>', opts)
-                vim.keymap.set('n', '<F2>', '<cmd>lua vim.lsp.buf.rename()<cr>', opts)
-                vim.keymap.set({ 'n', 'x' }, '<F3>', '<cmd>lua vim.lsp.buf.format({async = true})<cr>', opts)
-                vim.keymap.set('n', '<F4>', '<cmd>lua vim.lsp.buf.code_action()<cr>', opts)
+                vim.keymap.set('n', 'K', vim.lsp.buf.hover, opts)
+                vim.keymap.set('n', 'gd', vim.lsp.buf.definition, opts)
+                vim.keymap.set('n', 'gD', vim.lsp.buf.declaration, opts)
+                vim.keymap.set('n', 'gi', vim.lsp.buf.implementation, opts)
+                vim.keymap.set('n', 'go', vim.lsp.buf.type_definition, opts)
+                vim.keymap.set('n', 'gr', vim.lsp.buf.references, opts)
+                vim.keymap.set('n', 'gs', vim.lsp.buf.signature_help, opts)
+                vim.keymap.set('n', 'gl', vim.diagnostic.open_float, opts)
+                vim.keymap.set('n', '<F2>', vim.lsp.buf.rename, opts)
+                vim.keymap.set({ 'n', 'x' }, '<F3>', function() vim.lsp.buf.format({ async = true }) end, opts)
+                vim.keymap.set('n', '<F4>', vim.lsp.buf.code_action, opts)
             end,
         })
 
+        -- Mason setup
         require('mason').setup({})
         require('mason-lspconfig').setup({
             ensure_installed = {
@@ -108,15 +110,20 @@ return {
                 "ts_ls",
                 "eslint",
                 "pyright",
+                -- Don't try to install clangd via Mason since it's manually installed
             },
             handlers = {
+                -- Default handler for all other servers
                 function(server_name)
-                    if server_name == "luals" then return end -- avoid starting with {}
-                    require('lspconfig')[server_name].setup({})
+                    require('lspconfig')[server_name].setup({
+                        capabilities = capabilities,
+                    })
                 end,
 
+                -- Special config for lua_ls
                 lua_ls = function()
-                    require('lspconfig').luals.setup({
+                    require('lspconfig').lua_ls.setup({
+                        capabilities = capabilities,
                         settings = {
                             Lua = {
                                 runtime = {
@@ -126,7 +133,11 @@ return {
                                     globals = { 'vim' },
                                 },
                                 workspace = {
-                                    library = { vim.env.VIMRUNTIME },
+                                    library = vim.api.nvim_get_runtime_file("", true),
+                                    checkThirdParty = false,
+                                },
+                                telemetry = {
+                                    enable = false,
                                 },
                             },
                         },
@@ -135,8 +146,16 @@ return {
             },
         })
 
-        local cmp = require('cmp')
+        -- Manually setup clangd using system clangd
+        require('lspconfig').clangd.setup({
+            capabilities = capabilities,
+            cmd = { "clangd", "--background-index", "--clang-tidy" },
+            filetypes = { "c", "cpp", "objc", "objcpp" },
+            root_dir = require('lspconfig.util').root_pattern("compile_commands.json", "compile_flags.txt", ".git"),
+        })
 
+        -- nvim-cmp setup
+        local cmp = require('cmp')
         require('luasnip.loaders.from_vscode').lazy_load()
 
         vim.opt.completeopt = { 'menu', 'menuone', 'noselect' }
@@ -173,14 +192,9 @@ return {
                 end,
             },
             mapping = cmp.mapping.preset.insert({
-                -- confirm completion item
                 ['<CR>'] = cmp.mapping.confirm({ select = false }),
-
-                -- scroll documentation window
                 ['<C-f>'] = cmp.mapping.scroll_docs(5),
                 ['<C-u>'] = cmp.mapping.scroll_docs(-5),
-
-                -- toggle completion menu
                 ['<C-e>'] = cmp.mapping(function(fallback)
                     if cmp.visible() then
                         cmp.abort()
@@ -188,8 +202,6 @@ return {
                         cmp.complete()
                     end
                 end),
-
-                -- tab complete
                 ['<Tab>'] = cmp.mapping(function(fallback)
                     local col = vim.fn.col('.') - 1
 
@@ -201,11 +213,7 @@ return {
                         cmp.complete()
                     end
                 end, { 'i', 's' }),
-
-                -- go to previous item
                 ['<S-Tab>'] = cmp.mapping.select_prev_item({ behavior = 'select' }),
-
-                -- navigate to next snippet placeholder
                 ['<C-d>'] = cmp.mapping(function(fallback)
                     local luasnip = require('luasnip')
 
@@ -215,8 +223,6 @@ return {
                         fallback()
                     end
                 end, { 'i', 's' }),
-
-                -- navigate to the previous snippet placeholder
                 ['<C-b>'] = cmp.mapping(function(fallback)
                     local luasnip = require('luasnip')
 
