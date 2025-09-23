@@ -1,28 +1,89 @@
--- lua/plugins/cmp.lua
-
+-- lua/plugins/cmp.lua (replace your existing file with this)
 return {
-    -- Plugin list for lazy.nvim
     {
         'hrsh7th/nvim-cmp',
+        event = "InsertEnter",
         dependencies = {
+            "hrsh7th/cmp-nvim-lsp",
             'hrsh7th/cmp-buffer',
             'hrsh7th/cmp-path',
+            'hrsh7th/cmp-cmdline',
             'saadparwaiz1/cmp_luasnip',
-            'hrsh7th/cmp-nvim-lsp',
             'L3MON4D3/LuaSnip',
             'rafamadriz/friendly-snippets',
+
+            -- Copilot integration - IMPORTANT: Load copilot first
+            {
+                'zbirenbaum/copilot.lua',
+                cmd = "Copilot",
+                event = "InsertEnter",
+                config = function()
+                    require("copilot").setup({
+                        suggestion = { enabled = false }, -- disable built-in suggestion
+                        panel = { enabled = false },      -- disable built-in panel
+                        filetypes = {
+                            yaml = false,
+                            markdown = false,
+                            help = false,
+                            gitcommit = false,
+                            gitrebase = false,
+                            hgcommit = false,
+                            svn = false,
+                            cvs = false,
+                            ["."] = false,
+                            cpp = true,
+                            c = true,
+                            python = true,
+                            javascript = true,
+                            ["*"] = true, -- enable for all other filetypes
+                        },
+                    })
+                end,
+            },
+            {
+                'zbirenbaum/copilot-cmp',
+                config = function()
+                    require("copilot_cmp").setup()
+                end,
+            },
         },
         config = function()
             local cmp = require('cmp')
             local luasnip = require('luasnip')
 
-            -- Load vscode-style snippets from friendly-snippets
+            -- IMPORTANT: Wait a bit for copilot to initialize
+            vim.defer_fn(function()
+                -- Check if copilot_cmp is available
+                local ok, copilot_cmp = pcall(require, "copilot_cmp")
+                if not ok then
+                    vim.notify("copilot_cmp not found!", vim.log.levels.ERROR)
+                    return
+                end
+
+                -- Check if copilot source is registered
+                local sources = require("cmp").get_config().sources
+                local copilot_found = false
+                for _, source_group in ipairs(sources or {}) do
+                    for _, source in ipairs(source_group) do
+                        if source.name == "copilot" then
+                            copilot_found = true
+                            break
+                        end
+                    end
+                end
+
+                if not copilot_found then
+                    vim.notify("Copilot source not found in CMP config!", vim.log.levels.WARN)
+                end
+            end, 1000)
+
+            -- Load vscode-style snippets
             require('luasnip.loaders.from_vscode').lazy_load()
 
             -- Define a subtle thin border
             local border_chars = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" }
 
-            -- Set highlight for the floating window border (make it subtle and transparent)
+            -- Floating window border style
             vim.api.nvim_set_hl(0, "FloatBorder", { fg = "#5c6370", bg = "NONE" })
 
             cmp.setup({
@@ -70,32 +131,69 @@ return {
                 }),
 
                 sources = cmp.config.sources({
-                    { name = 'nvim_lsp' },
-                    { name = 'luasnip' },
-                    { name = 'buffer' },
-                    { name = 'path' },
+                    { name = "copilot",  group_index = 2 },
+                    { name = "nvim_lsp", group_index = 2 },
+                    { name = "luasnip",  group_index = 2 },
+                }, {
+                    { name = "buffer", group_index = 2 },
+                    { name = "path",   group_index = 2 },
                 }),
 
                 formatting = {
                     fields = { 'abbr', 'kind', 'menu' },
                     format = function(entry, vim_item)
                         local source_names = {
+                            copilot = '[Copilot]',
                             nvim_lsp = '[LSP]',
                             luasnip = '[Snippet]',
                             buffer = '[Buffer]',
                             path = '[Path]',
                         }
                         vim_item.menu = source_names[entry.source.name] or ''
+
+                        -- Add special highlighting for copilot
+                        if entry.source.name == "copilot" then
+                            vim_item.kind = ""
+                            vim_item.kind_hl_group = "CmpItemKindCopilot"
+                        end
+
                         return vim_item
                     end,
                 },
 
+                -- Add copilot-specific sorting
+                sorting = {
+                    priority_weight = 2,
+                    comparators = {
+                        -- Try to require copilot comparator, but don't fail if not available
+                        function(entry1, entry2)
+                            local ok, comparator = pcall(require, "copilot_cmp.comparators")
+                            if ok and comparator.prioritize then
+                                return comparator.prioritize(entry1, entry2)
+                            end
+                            return nil
+                        end,
+                        cmp.config.compare.offset,
+                        cmp.config.compare.exact,
+                        cmp.config.compare.score,
+                        cmp.config.compare.recently_used,
+                        cmp.config.compare.locality,
+                        cmp.config.compare.kind,
+                        cmp.config.compare.sort_text,
+                        cmp.config.compare.length,
+                        cmp.config.compare.order,
+                    },
+                },
+
                 experimental = {
-                    ghost_text = true,
+                    ghost_text = false, -- Disabled since we use copilot
                 },
             })
 
-            -- `/` cmdline setup for buffer source
+            -- Set highlight for Copilot
+            vim.api.nvim_set_hl(0, "CmpItemKindCopilot", { fg = "#6CC644" })
+
+            -- `/` cmdline setup
             cmp.setup.cmdline('/', {
                 mapping = cmp.mapping.preset.cmdline(),
                 sources = {
@@ -103,7 +201,7 @@ return {
                 }
             })
 
-            -- `:` cmdline setup for path and cmdline sources
+            -- `:` cmdline setup
             cmp.setup.cmdline(':', {
                 mapping = cmp.mapping.preset.cmdline(),
                 sources = cmp.config.sources({
@@ -112,6 +210,22 @@ return {
                     { name = 'cmdline' }
                 })
             })
+
+            -- Debug command
+            vim.api.nvim_create_user_command('CopilotDebug', function()
+                local copilot_ok = pcall(require, "copilot")
+                local copilot_cmp_ok = pcall(require, "copilot_cmp")
+
+                print("Copilot loaded:", copilot_ok)
+                print("Copilot CMP loaded:", copilot_cmp_ok)
+
+                -- Check if copilot source is available
+                local sources = {}
+                for name, source in pairs(require("cmp").core.sources) do
+                    table.insert(sources, name)
+                end
+                print("Available CMP sources:", vim.inspect(sources))
+            end, {})
         end,
     }
 }
